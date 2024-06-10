@@ -1,5 +1,6 @@
 import argparse
 import logging
+import time
 from abc import ABC, abstractmethod
 from typing import Dict, List
 
@@ -69,47 +70,57 @@ class VfsBot(ABC):
 
         appointment_params = self.get_appointment_params(args)
 
-        # Launch browser and perform actions
-        with sync_playwright() as p:
-            browser = getattr(p, browser_type).launch(
-                headless=headless_mode in ("True", "true")
-            )
-            page = browser.new_page()
-            stealth_sync(page)
+        max_retries = 3
+        retry_delay = 30  # 30 seconds
 
-            page.goto(vfs_url)
-            self.pre_login_steps(page)
-
-            try:
-                self.login(page, email_id, password)
-                logging.info("Logged in successfully")
-            except Exception:
-                browser.close()
-                raise LoginError(
-                    "\033[1;31mLogin failed. "
-                    + "Please verify your username and password by logging in to the browser and try again.\033[0m"
+        for attempt in range(1, max_retries + 1):
+            with sync_playwright() as p:
+                browser = getattr(p, browser_type).launch(
+                    headless=headless_mode in ("True", "true")
                 )
+                page = browser.new_page()
+                stealth_sync(page)
 
-            logging.info(f"Checking appointments for {appointment_params}")
-            appointment_found = False
-            try:
-                dates = self.check_for_appontment(page, appointment_params)
-                if dates:
-                    # Log successful appointment finding
-                    logging.info(
-                        f"\033[1;32mFound appointments on: {', '.join(dates)} \033[0m"
-                    )
-                    self.notify_appointment(appointment_params, dates)
-                    appointment_found = True
-                else:
-                    # Log no appointments found
-                    logging.info(
-                        "\033[1;33mNo appointments found for the specified criteria.\033[0m"
-                    )
-            except Exception as e:
-                logging.error(f"Appointment check failed: {e}")
-            browser.close()
-            return appointment_found
+                page.goto(vfs_url)
+                self.pre_login_steps(page)
+
+                try:
+                    self.login(page, email_id, password)
+                    logging.info("Logged in successfully")
+                except Exception:
+                    browser.close()
+                    if attempt < max_retries:
+                        logging.error(
+                            f"Login failed on attempt {attempt}. Retrying in {retry_delay} seconds..."
+                        )
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        raise LoginError(
+                            "\033[1;31mLogin failed. "
+                            + "Please verify your username and password by logging in to the browser and try again.\033[0m"
+                        )
+
+                logging.info(f"Checking appointments for {appointment_params}")
+                appointment_found = False
+                try:
+                    dates = self.check_for_appontment(page, appointment_params)
+                    if dates:
+                        # Log successful appointment finding
+                        logging.info(
+                            f"\033[1;32mFound appointments on: {', '.join(dates)} \033[0m"
+                        )
+                        self.notify_appointment(appointment_params, dates)
+                        appointment_found = True
+                    else:
+                        # Log no appointments found
+                        logging.info(
+                            "\033[1;33mNo appointments found for the specified criteria.\033[0m"
+                        )
+                except Exception as e:
+                    logging.error(f"Appointment check failed: {e}")
+                browser.close()
+                return appointment_found
 
     def get_appointment_params(self, args: argparse.Namespace) -> Dict[str, str]:
         """
@@ -219,3 +230,17 @@ class VfsBot(ABC):
         raise NotImplementedError(
             "Subclasses must implement appointment checking logic"
         )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='VFS Appointment Bot')
+    parser.add_argument('-sc', '--source_country', required=True, help='Source country code')
+    parser.add_argument('-dc', '--destination_country', required=True, help='Destination country code')
+    parser.add_argument('-ap', '--appointment_params', type=lambda kv: dict([kv.split("=")]), help='Appointment parameters')
+    args = parser.parse_args()
+
+    # VfsBot sınıfından bir alt sınıf oluşturup run metodunu çağırmalısınız
+    # Bu, mevcut kod yapınız ve sınıf yapınıza bağlı olarak değişiklik gösterebilir
+    # Örnek:
+    # bot = VfsBotTR(args.source_country)
+    # bot.run(args)
